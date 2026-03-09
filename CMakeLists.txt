@@ -14,7 +14,5 @@ add_executable(laba1
         math/vector/vector.cpp
         math/matrix/matrix.cpp
         math/random/random.cpp
-        math/vector/vector.h
-        math/matrix/matrix.h
-        math/random/random.h
+        generator/generator.cpp
 )
