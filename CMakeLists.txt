@@ -15,4 +15,8 @@ add_executable(laba1
         math/matrix/matrix.cpp
         math/random/random.cpp
         generator/generator.cpp
+        classifier/classifier.h
+        classifier/classifier.cpp
+        geneticalg/geneticalg.h
+        geneticalg/geneticalg.cpp
 )
