@@ -2,7 +2,6 @@
 #define VECTOR_HPP
 
 #include <vector>
-#include <stdexcept>
 
 class Vector {
 private:
