@@ -19,4 +19,6 @@ add_executable(laba1
         classifier/classifier.cpp
         geneticalg/geneticalg.h
         geneticalg/geneticalg.cpp
+        activation/activation.cpp
+        activation/activation.h
 )
