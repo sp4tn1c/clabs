@@ -8,6 +8,7 @@ private:
     std::vector<float> data;
 
 public:
+    Vector();
     Vector(size_t size);
     Vector(const std::vector<float>& data);
 

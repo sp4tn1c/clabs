@@ -20,3 +20,14 @@ add_executable(laba1
         geneticalg/geneticalg.h
         geneticalg/geneticalg.cpp
 )
+
+add_executable(lab2 
+    main_lab2.cpp
+    generator/generator.cpp
+    math/vector/vector.cpp
+    math/matrix/matrix.cpp
+    math/random/random.cpp
+    neural/neuralnetwork.cpp
+)
+
+target_include_directories(lab2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
