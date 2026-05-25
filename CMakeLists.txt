@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
-project(laba1)
+project(ml_labs)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(
-        ${CMAKE_SOURCE_DIR}/math
         ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/math
 )
 
 add_executable(laba1
@@ -15,19 +15,7 @@ add_executable(laba1
         math/matrix/matrix.cpp
         math/random/random.cpp
         generator/generator.cpp
-        classifier/classifier.h
         classifier/classifier.cpp
-        geneticalg/geneticalg.h
         geneticalg/geneticalg.cpp
+        neural/neuralnetwork.cpp
 )
-
-add_executable(lab2 
-    main_lab2.cpp
-    generator/generator.cpp
-    math/vector/vector.cpp
-    math/matrix/matrix.cpp
-    math/random/random.cpp
-    neural/neuralnetwork.cpp
-)
-
-target_include_directories(lab2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
