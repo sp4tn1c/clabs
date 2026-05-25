@@ -1,0 +1,39 @@
+# CMake / CLion
+cmake-build-debug/
+cmake-build-release/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+
+# Компиляция
+*.o
+*.obj
+*.exe
+*.a
+*.lib
+*.so
+*.dylib
+
+# Сгенерированные данные
+data/*.csv
+output/*.png
+output/*.jpg
+
+# Системные файлы
+.DS_Store
+._*
+Thumbs.db
+
+# IDE
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.pyc
+.venv/
