@@ -1,40 +1,43 @@
 #include "generator/generator.h"
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 DataGenerator::DataGenerator(unsigned int seed) : rng(seed) {}
 
 std::vector<DataPoint> DataGenerator::generate(size_t n_per_class, float separation) {
     std::vector<DataPoint> data;
     
-    // Класс +1
+    // Класс +1: центр в (+separation/2, +separation/2)
     for (size_t i = 0; i < n_per_class; ++i) {
         float x = rng.normal(separation / 2.0f, 0.5f);
         float y = rng.normal(separation / 2.0f, 0.5f);
-        data.push_back({x, y, 1});
+        data.push_back(DataPoint({x, y}, 1));  // ← ИСПРАВЛЕНО
     }
-    
-    // Класс -1
+
+    // Класс -1: центр в (-separation/2, -separation/2)
     for (size_t i = 0; i < n_per_class; ++i) {
         float x = rng.normal(-separation / 2.0f, 0.5f);
         float y = rng.normal(-separation / 2.0f, 0.5f);
-        data.push_back({x, y, -1});
+        data.push_back(DataPoint({x, y}, -1));  // ← ИСПРАВЛЕНО
     }
-    
+
     return data;
 }
 
 void DataGenerator::save_to_csv(const std::vector<DataPoint>& data, const std::string& filename) {
     std::ofstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Error: cannot open " << filename << std::endl;
+        std::cerr << "Error: Cannot create file " << filename << std::endl;
         return;
     }
-    
-    file << "x,y,label\n";
+
+    file << "feature_0,feature_1,target\n";  // ← Заголовок как у преподавателя
     for (const auto& p : data) {
-        file << p.x << "," << p.y << "," << p.label << "\n";
+        // ← ИСПРАВЛЕНО: используем features[0], features[1]
+        file << p.features[0] << "," << p.features[1] << "," << p.label << "\n";
     }
+
     file.close();
     std::cout << "Saved " << data.size() << " points to " << filename << std::endl;
 }
@@ -42,25 +45,34 @@ void DataGenerator::save_to_csv(const std::vector<DataPoint>& data, const std::s
 std::vector<DataPoint> DataGenerator::load_from_csv(const std::string& filename) {
     std::vector<DataPoint> data;
     std::ifstream file(filename);
+
     if (!file.is_open()) {
-        std::cerr << "Error: cannot open " << filename << std::endl;
+        std::cerr << "Error: Cannot open file " << filename << std::endl;
         return data;
     }
-    
+
+    // Пропускаем заголовок
+    std::string header;
+    std::getline(file, header);
+
     std::string line;
-    std::getline(file, line);
-    
     while (std::getline(file, line)) {
-        if (line.empty()) continue;
-        size_t p1 = line.find(',');
-        size_t p2 = line.find(',', p1 + 1);
-        float x = std::stof(line.substr(0, p1));
-        float y = std::stof(line.substr(p1 + 1, p2 - p1 - 1));
-        int label = std::stoi(line.substr(p2 + 1));
-        data.push_back({x, y, label});
+        std::stringstream ss(line);
+        std::string token;
+        std::vector<float> values;
+
+        while (std::getline(ss, token, ',')) {
+            values.push_back(std::stof(token));
+        }
+
+        if (values.size() >= 3) {
+            // ← ИСПРАВЛЕНО: создаём DataPoint с вектором признаков
+            std::vector<float> features = {values[0], values[1]};
+            int label = static_cast<int>(values[2]);
+            data.push_back(DataPoint(std::move(features), label));
+        }
     }
-    
+
     file.close();
-    std::cout << "Loaded " << data.size() << " points from " << filename << std::endl;
     return data;
 }
