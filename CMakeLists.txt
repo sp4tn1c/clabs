@@ -22,5 +22,6 @@ add_executable(laba1
         metrics/f1score.cpp
         data/dataloader.h
         data/dataloader.cpp
-        test_load.cpp
+#        test_load.cpp
+        neural/neural_trainer.cpp
 )
