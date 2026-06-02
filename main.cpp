@@ -13,28 +13,11 @@
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
-// Обучение линейного классификатора через ГА
-Vector train_linear_classifier(const std::vector<DataPoint>& train_data) {
-    GeneticAlg ga(42, 50, 100, 0.1f, 0.1f);
-    return ga.train(train_data);
-}
-
-// Обучение нейросети через NeuralTrainer
 void train_neural_network(NeuralNetwork& net, const std::vector<DataPoint>& train_data) {
     NeuralTrainer trainer(net, train_data, 50, 200, 0.2f, 0.2f);
     trainer.train();
 }
 
-// Предсказания для набора данных (линейный классификатор)
-std::vector<int> predict_linear(const Classifier& clf, const std::vector<DataPoint>& data) {
-    std::vector<int> predictions;
-    for (const auto& p : data) {
-        predictions.push_back(clf.predict(p));
-    }
-    return predictions;
-}
-
-// Предсказания для набора данных (нейросеть)
 std::vector<int> predict_neural(const NeuralNetwork& net, const std::vector<DataPoint>& data) {
     std::vector<int> predictions;
     for (const auto& p : data) {
@@ -44,7 +27,6 @@ std::vector<int> predict_neural(const NeuralNetwork& net, const std::vector<Data
     return predictions;
 }
 
-// Печать отчёта по метрикам
 void print_metrics(const std::string& name, const ClassificationReport& report) {
     std::cout << std::fixed << std::setprecision(3);
     std::cout << "  " << name << ":" << std::endl;
@@ -53,147 +35,298 @@ void print_metrics(const std::string& name, const ClassificationReport& report) 
     std::cout << "    F1:        " << report.f1() << std::endl;
 }
 
-// ==================== ОБУЧЕНИЕ И ТЕСТ НА ОДНОМ ДАТАСЕТЕ ====================
+// ==================== ОЦЕНКА НА ДАТАСЕТЕ (80/20 split) ====================
 
 struct DatasetResult {
-    float f1_linear;
-    float f1_neural;
+    std::string name;
+    size_t feature_count;
     size_t train_size;
     size_t test_size;
+    float f1_neural;
+    NeuralNetwork* trained_net;  // Указатель на обученную сеть (для fine-tuning)
 };
 
-DatasetResult evaluate_dataset(const std::string& name,
-                                const std::string& filepath,
-                                size_t feature_count) {
+DatasetResult evaluate_dataset(const std::string& name, const std::string& filepath) {
     std::cout << "\n========================================" << std::endl;
     std::cout << "  Evaluating: " << name << " (" << filepath << ")" << std::endl;
     std::cout << "========================================" << std::endl;
 
-    // 1. Загрузка данных
+    // 1. Загрузка
     std::cout << "\n[1] Loading data..." << std::endl;
     auto data = DataLoader::loadFromCSV(filepath);
     if (data.empty()) {
         std::cerr << "  ERROR: No data loaded!" << std::endl;
-        return {0.0f, 0.0f, 0, 0};
-    }
-    std::cout << "  Loaded: " << data.size() << " points" << std::endl;
-    std::cout << "  Features: " << DataLoader::getFeatureCount(data) << std::endl;
-
-    // 2. Конвертация меток (если нужно)
-    // Проверяем, есть ли метки -1 (линейный классификатор работает с -1/1)
-    bool has_negative_labels = false;
-    for (const auto& p : data) {
-        if (p.label == -1) { has_negative_labels = true; break; }
+        return {name, 0, 0, 0, 0.0f, nullptr};
     }
 
-    // Если все метки 0/1, оставляем как есть (для нейросети)
-    // Если есть -1, конвертируем -1→0 для нейросети позже
+    size_t feature_count = DataLoader::getFeatureCount(data);
+    std::cout << "  Loaded: " << data.size() << " points, " << feature_count << " features" << std::endl;
+
+    // 2. Конвертация меток (-1 → 0)
+    for (auto& p : data) { if (p.label == -1) p.label = 0; }
 
     // 3. Split 80/20
     std::cout << "\n[2] Splitting data (80/20)..." << std::endl;
     std::vector<DataPoint> train_data, test_data;
     DataLoader::splitTrainTest(data, train_data, test_data, 0.8f, 42);
-    std::cout << "  Train: " << train_data.size() << std::endl;
-    std::cout << "  Test:  " << test_data.size() << std::endl;
+    std::cout << "  Train: " << train_data.size() << ", Test: " << test_data.size() << std::endl;
 
-    // 4. Линейный классификатор
-    std::cout << "\n[3] Training Linear Classifier..." << std::endl;
-    Vector best_weights = train_linear_classifier(train_data);
-    Classifier clf(2);
-    clf.set_weights(best_weights);
+    // 4. Нейросеть
+    std::cout << "\n[3] Creating & Training Neural Network..." << std::endl;
+    int hidden_size = static_cast<int>(feature_count) * 2;
+    NeuralNetwork* net = new NeuralNetwork(static_cast<int>(feature_count), hidden_size, 1);
+    net->init_weights();
+    train_neural_network(*net, train_data);
 
-    auto pred_linear = predict_linear(clf, test_data);
-    std::vector<int> labels_linear;
-    for (const auto& p : test_data) {
-        // Конвертируем 0→-1 для сравнения с линейным классификатором
-        labels_linear.push_back(p.label == 0 ? -1 : p.label);
-    }
-    auto report_linear = F1Metric::calculate(pred_linear, labels_linear);
-    print_metrics("Linear Classifier", report_linear);
+    // 5. Тестирование
+    std::cout << "\n[4] Evaluating..." << std::endl;
+    auto pred = predict_neural(*net, test_data);
+    std::vector<int> labels;
+    for (const auto& p : test_data) labels.push_back(p.label);
 
-    // 5. Нейросеть
-    std::cout << "\n[4] Training Neural Network..." << std::endl;
-    int in_size = static_cast<int>(DataLoader::getFeatureCount(data));
-    NeuralNetwork net(in_size, in_size * 2, 1);  // hidden = 2*input
-    net.init_weights();
-    train_neural_network(net, train_data);
+    auto report = F1Metric::calculate(pred, labels);
+    print_metrics("Neural Network", report);
 
-    auto pred_neural = predict_neural(net, test_data);
-    std::vector<int> labels_neural;
-    for (const auto& p : test_data) {
-        labels_neural.push_back(p.label);  // 0/1 для нейросети
-    }
-    auto report_neural = F1Metric::calculate(pred_neural, labels_neural);
-    print_metrics("Neural Network", report_neural);
-
-    // 6. Сохранение результатов
+    // 6. Сохранение
     std::cout << "\n[5] Saving results..." << std::endl;
-    std::string prefix = (name == "d1") ? "d1" : "d2";
-
+    std::string prefix = (name == "d1") ? "d1" : (name == "d2") ? "d2" : "d3";
     std::ofstream results("data/" + prefix + "_predictions.csv");
-    results << "feature_0,feature_1,feature_2,feature_3,true_label,pred_linear,pred_neural\n";
+    for (size_t f = 0; f < feature_count; ++f) results << "feature_" << f << ",";
+    results << "true_label,pred_neural\n";
     for (size_t i = 0; i < test_data.size(); ++i) {
-        for (size_t f = 0; f < test_data[i].features.size(); ++f) {
+        for (size_t f = 0; f < test_data[i].features.size(); ++f)
             results << test_data[i].features[f] << ",";
-        }
-        results << test_data[i].label << "," << pred_linear[i] << "," << pred_neural[i] << "\n";
+        results << test_data[i].label << "," << pred[i] << "\n";
     }
     results.close();
-    std::cout << "  Saved: data/" << prefix << "_predictions.csv" << std::endl;
 
-    return {report_linear.f1(), report_neural.f1(), train_data.size(), test_data.size()};
+    return {name, feature_count, train_data.size(), test_data.size(), report.f1(), net};
 }
 
+// ==================== ДООБУЧЕНИЕ НА D3 (FINE-TUNING) ====================
+
+float fine_tune_and_evaluate_d3(const std::string& d3_path,
+                                 NeuralNetwork* base_net,
+                                 size_t base_feature_count) {
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "  Fine-tuning on d3 (Defense Mode)     " << std::endl;
+    std::cout << "========================================" << std::endl;
+
+    // 1. Загрузка d3
+    auto d3_data = DataLoader::loadFromCSV(d3_path);
+    if (d3_data.empty()) {
+        std::cerr << "  ERROR: Cannot load d3!" << std::endl;
+        return 0.0f;
+    }
+    size_t d3_features = DataLoader::getFeatureCount(d3_data);
+    std::cout << "  Loaded: " << d3_data.size() << " points, " << d3_features << " features" << std::endl;
+
+    // 2. Конвертация меток
+    for (auto& p : d3_data) { if (p.label == -1) p.label = 0; }
+
+    // 3. Split 80/20 для d3
+    std::vector<DataPoint> d3_train, d3_test;
+    DataLoader::splitTrainTest(d3_data, d3_train, d3_test, 0.8f, 42);
+    std::cout << "  Train: " << d3_train.size() << ", Test: " << d3_test.size() << std::endl;
+
+    // 4. Fine-tuning: если число признаков совпадает — используем base_net
+    NeuralNetwork* net_for_d3 = base_net;
+    if (d3_features != base_feature_count) {
+        std::cout << "  ⚠️  Feature count mismatch (" << base_feature_count << " → " << d3_features << ")" << std::endl;
+        std::cout << "  Creating new network for d3..." << std::endl;
+        // Создаём новую сеть с правильным числом входов
+        int hidden = static_cast<int>(d3_features) * 2;
+        net_for_d3 = new NeuralNetwork(static_cast<int>(d3_features), hidden, 1);
+        net_for_d3->init_weights();
+        // Короткое обучение на d3_train (так как нет базовых весов)
+        train_neural_network(*net_for_d3, d3_train);
+    } else {
+        // Fine-tune: меньше эпох, меньшая "агрессия"
+        std::cout << "  Fine-tuning existing model..." << std::endl;
+        NeuralTrainer trainer(*net_for_d3, d3_train, 30, 50, 0.1f, 0.1f);
+        trainer.train();
+    }
+
+    // 5. Оценка на d3_test
+    std::cout << "\n[1] Evaluating on d3 test set..." << std::endl;
+    auto pred = predict_neural(*net_for_d3, d3_test);
+    std::vector<int> labels;
+    for (const auto& p : d3_test) labels.push_back(p.label);
+
+    auto report = F1Metric::calculate(pred, labels);
+    print_metrics("Neural Network (fine-tuned)", report);
+
+    // 6. Сохранение
+    std::ofstream results("data/d3_predictions.csv");
+    for (size_t f = 0; f < d3_features; ++f) results << "feature_" << f << ",";
+    results << "true_label,pred_neural\n";
+    for (size_t i = 0; i < d3_test.size(); ++i) {
+        for (size_t f = 0; f < d3_test[i].features.size(); ++f)
+            results << d3_test[i].features[f] << ",";
+        results << d3_test[i].label << "," << pred[i] << "\n";
+    }
+    results.close();
+
+    // Не удаляем net_for_d3, если это не base_net (чтобы избежать double delete)
+    if (d3_features != base_feature_count && net_for_d3 != base_net) {
+        delete net_for_d3;
+    }
+
+    return report.f1();
+}
 // ==================== MAIN ====================
 
 int main() {
     std::cout << "========================================" << std::endl;
-    std::cout << "  Lab 3-4: Neural Network Evaluation   " << std::endl;
-    std::cout << "  Datasets: d1.csv (2 features)        " << std::endl;
-    std::cout << "            d2.csv (4 features)        " << std::endl;
+    std::cout << "  Lab 3-4: Universal Neural Network    " << std::endl;
+    std::cout << "  (Fine-tuning supported)              " << std::endl;
     std::cout << "========================================" << std::endl;
 
-    // Оценка на d1
-    auto result_d1 = evaluate_dataset("d1", "data/d1.csv", 2);
+    // ==================== ШАГ 1: Определяем макс. число признаков ====================
+    std::cout << "\n[1] Detecting max features..." << std::endl;
+    size_t max_features = 0;
 
-    // Оценка на d2
-    auto result_d2 = evaluate_dataset("d2", "data/d2.csv", 4);
+    // Проверяем d1
+    auto d1_check = DataLoader::loadFromCSV("data/d1.csv");
+    max_features = std::max(max_features, DataLoader::getFeatureCount(d1_check));
+    std::cout << "  d1: " << DataLoader::getFeatureCount(d1_check) << " features" << std::endl;
 
-    // Итоговая таблица
+    // Проверяем d2
+    auto d2_check = DataLoader::loadFromCSV("data/d2.csv");
+    max_features = std::max(max_features, DataLoader::getFeatureCount(d2_check));
+    std::cout << "  d2: " << DataLoader::getFeatureCount(d2_check) << " features" << std::endl;
+
+    // Проверяем d3 (если есть)
+    std::ifstream d3_check("data/d3.csv");
+    bool has_d3 = d3_check.good();
+    d3_check.close();
+    if (has_d3) {
+        auto d3_check_data = DataLoader::loadFromCSV("data/d3.csv");
+        max_features = std::max(max_features, DataLoader::getFeatureCount(d3_check_data));
+        std::cout << "  d3: " << DataLoader::getFeatureCount(d3_check_data) << " features" << std::endl;
+    }
+
+    std::cout << "  → Max features: " << max_features << std::endl;
+    std::cout << "  → Creating universal network: " << max_features << " → "
+              << (max_features * 2) << " → 1" << std::endl;
+
+    // ==================== ШАГ 2: Создаём ОДНУ универсальную сеть ====================
+    NeuralNetwork net(static_cast<int>(max_features),
+                      static_cast<int>(max_features) * 2, 1);
+    net.init_weights();
+
+    std::vector<DatasetResult> results;
+
+    // ==================== ШАГ 3: Оценка на d1 ====================
     std::cout << "\n========================================" << std::endl;
-    std::cout << "  FINAL RESULTS                         " << std::endl;
+    std::cout << "  Evaluating: d1                        " << std::endl;
+    std::cout << "========================================" << std::endl;
+
+    auto d1_data = DataLoader::loadFromCSV("data/d1.csv", max_features);  // ← С padding!
+    for (auto& p : d1_data) { if (p.label == -1) p.label = 0; }
+
+    std::vector<DataPoint> d1_train, d1_test;
+    DataLoader::splitTrainTest(d1_data, d1_train, d1_test, 0.8f, 42);
+    std::cout << "  Train: " << d1_train.size() << ", Test: " << d1_test.size() << std::endl;
+
+    // Обучаем на d1
+    std::cout << "  Training on d1..." << std::endl;
+    train_neural_network(net, d1_train);
+
+    // Тестируем
+    auto pred = predict_neural(net, d1_test);
+    std::vector<int> labels;
+    for (const auto& p : d1_test) labels.push_back(p.label);
+    auto report = F1Metric::calculate(pred, labels);
+    print_metrics("Neural Network", report);
+    results.push_back({"d1", max_features, d1_train.size(), d1_test.size(), report.f1()});
+
+    // ==================== ШАГ 4: Оценка на d2 ====================
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "  Evaluating: d2                        " << std::endl;
+    std::cout << "========================================" << std::endl;
+
+    auto d2_data = DataLoader::loadFromCSV("data/d2.csv", max_features);  // ← С padding!
+    for (auto& p : d2_data) { if (p.label == -1) p.label = 0; }
+
+    std::vector<DataPoint> d2_train, d2_test;
+    DataLoader::splitTrainTest(d2_data, d2_train, d2_test, 0.8f, 42);
+    std::cout << "  Train: " << d2_train.size() << ", Test: " << d2_test.size() << std::endl;
+
+    // Дообучаем на d2 (fine-tune с весами от d1!)
+    std::cout << "  Fine-tuning on d2..." << std::endl;
+    NeuralTrainer trainer_d2(net, d2_train, 50, 100, 0.15f, 0.15f);  // Меньше эпох
+    trainer_d2.train();
+
+    // Тестируем
+    pred = predict_neural(net, d2_test);
+    labels.clear();
+    for (const auto& p : d2_test) labels.push_back(p.label);
+    report = F1Metric::calculate(pred, labels);
+    print_metrics("Neural Network (fine-tuned)", report);
+    results.push_back({"d2", max_features, d2_train.size(), d2_test.size(), report.f1()});
+
+    // ==================== ШАГ 5: Итоговая оценка ====================
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "  FINAL RESULTS (d1 + d2)              " << std::endl;
     std::cout << "========================================" << std::endl;
     std::cout << std::fixed << std::setprecision(3);
 
-    printf("%-15s | %-10s | %-10s | %-10s | %-10s\n",
-           "Dataset", "Train", "Test", "F1 Linear", "F1 Neural");
-    printf("------------------------------------------------------------------------\n");
-    printf("%-15s | %-10zu | %-10zu | %-10.3f | %-10.3f\n",
-           "d1", result_d1.train_size, result_d1.test_size, result_d1.f1_linear, result_d1.f1_neural);
-    printf("%-15s | %-10zu | %-10zu | %-10.3f | %-10.3f\n",
-           "d2", result_d2.train_size, result_d2.test_size, result_d2.f1_linear, result_d2.f1_neural);
+    printf("%-10s | %-6s | %-6s | %-8s\n", "Dataset", "Train", "Test", "F1 Neural");
+    printf("------------------------------------------------\n");
+    for (const auto& r : results) {
+        printf("%-10s | %-6zu | %-6zu | %-8.3f\n",
+               r.name.c_str(), r.train_size, r.test_size, r.f1_neural);
+    }
 
-    // Итоговая оценка по формуле из ТЗ
+    float final_score = 0.5f * results[0].f1_neural + 0.5f * results[1].f1_neural;
+    std::cout << "\n  >>> FINAL SCORE: " << final_score << " <<<" << std::endl;
+    if (final_score >= 0.55f) {
+        std::cout << "  ✅ PASSED! (>= 0.55)" << std::endl;
+    } else {
+        std::cout << "  ❌ FAILED! (< 0.55)" << std::endl;
+    }
+
+    // ==================== ШАГ 6: Дообучение на d3 (защита) ====================
     std::cout << "\n========================================" << std::endl;
-    std::cout << "  FINAL SCORE (by TЗ formula)           " << std::endl;
+    std::cout << "  DEFENSE: d3 fine-tuning               " << std::endl;
     std::cout << "========================================" << std::endl;
 
-    // F1 для итоговой оценки берём от нейросети (т.к. Лаба 3-4 про неё)
-    float final_score = 0.5f * result_d1.f1_neural + 0.5f * result_d2.f1_neural;
+    if (has_d3) {
+        std::cout << "\n✅ d3.csv found — starting fine-tuning..." << std::endl;
 
-    std::cout << "  Formula: 0.5 × F1(d1) + 0.5 × F1(d2)" << std::endl;
-    std::cout << "  F1(d1) = " << result_d1.f1_neural << std::endl;
-    std::cout << "  F1(d2) = " << result_d2.f1_neural << std::endl;
-    std::cout << "\n  >>> FINAL SCORE: " << final_score << " <<<" << std::endl;
+        auto d3_data = DataLoader::loadFromCSV("data/d3.csv", max_features);  // ← С padding!
+        for (auto& p : d3_data) { if (p.label == -1) p.label = 0; }
 
-    if (final_score >= 0.55f) {
-        std::cout << "\n  ✅ PASSED! (>= 0.55)" << std::endl;
+        std::vector<DataPoint> d3_train, d3_test;
+        DataLoader::splitTrainTest(d3_data, d3_train, d3_test, 0.8f, 42);
+        std::cout << "  Train: " << d3_train.size() << ", Test: " << d3_test.size() << std::endl;
+
+        // Fine-tune на d3 (продолжаем с весами от d1+d2!)
+        std::cout << "  Fine-tuning on d3..." << std::endl;
+        NeuralTrainer trainer_d3(net, d3_train, 30, 50, 0.1f, 0.1f);
+        trainer_d3.train();
+
+        // Тестируем
+        pred = predict_neural(net, d3_test);
+        labels.clear();
+        for (const auto& p : d3_test) labels.push_back(p.label);
+        report = F1Metric::calculate(pred, labels);
+        print_metrics("Neural Network (fine-tuned on d3)", report);
+
+        std::cout << "\n  F1(d3) = " << report.f1() << std::endl;
+        if (report.f1() >= 0.55f) {
+            std::cout << "  ✅ d3 PASSED! (>= 0.55)" << std::endl;
+        } else {
+            std::cout << "  ⚠️  d3 below threshold (< 0.55)" << std::endl;
+        }
     } else {
-        std::cout << "\n  ❌ FAILED! (< 0.55) - Need to improve model!" << std::endl;
+        std::cout << "\n⚠️  d3.csv not found" << std::endl;
+        std::cout << "  On defense: put d3.csv in data/ and rerun" << std::endl;
     }
 
     std::cout << "\n========================================" << std::endl;
-    std::cout << "  Next step: Python integration (pybind11)" << std::endl;
+    std::cout << "  Ready for Defense!                    " << std::endl;
     std::cout << "========================================" << std::endl;
 
     return 0;

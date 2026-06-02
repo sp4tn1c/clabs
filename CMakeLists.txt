@@ -18,10 +18,7 @@ add_executable(laba1
         classifier/classifier.cpp
         geneticalg/geneticalg.cpp
         neural/neuralnetwork.cpp
-        metrics/f1score.h
         metrics/f1score.cpp
-        data/dataloader.h
         data/dataloader.cpp
-#        test_load.cpp
         neural/neural_trainer.cpp
 )

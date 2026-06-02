@@ -4,54 +4,50 @@
 #include <algorithm>
 #include <iostream>
 
-std::vector<DataPoint> DataLoader::loadFromCSV(const std::string& filename) {
+std::vector<DataPoint> DataLoader::loadFromCSV(const std::string& filename,
+                                                size_t max_features) {
     std::vector<DataPoint> data;
     std::ifstream file(filename);
-    
+
     if (!file.is_open()) {
         std::cerr << "Error: Cannot open file: " << filename << std::endl;
         return data;
     }
-    
-    // Пропускаем заголовок (feature_0,feature_1,...,target)
+
+    // Пропускаем заголовок
     std::string header;
     std::getline(file, header);
-    
-    // Читаем строки данных
+
     std::string line;
     while (std::getline(file, line)) {
-        // Пропускаем пустые строки
-        if (line.empty() || line.find_first_not_of(" \t\r\n") == std::string::npos) {
-            continue;
-        }
-        
+        if (line.empty()) continue;
+
         std::stringstream ss(line);
         std::string token;
         std::vector<float> values;
-        
-        // Парсим значения, разделённые запятой
+
         while (std::getline(ss, token, ',')) {
-            // Удаляем пробелы
             token.erase(0, token.find_first_not_of(" \t"));
             token.erase(token.find_last_not_of(" \t") + 1);
-            
             if (!token.empty()) {
-                try {
-                    values.push_back(std::stof(token));
-                } catch (const std::exception& e) {
-                    std::cerr << "Warning: Could not parse value: " << token << std::endl;
-                }
+                values.push_back(std::stof(token));
             }
         }
-        
-        // Последний элемент — метка, остальные — признаки
+
         if (values.size() >= 2) {
-            std::vector<float> features(values.begin(), values.end() - 1);
+            // Последний элемент — метка, остальные — признаки
             int label = static_cast<int>(values.back());
+            std::vector<float> features(values.begin(), values.end() - 1);
+
+            // ← ← ← ДОБАВИТЬ ZERO-PADDING ← ← ←
+            if (max_features > 0 && features.size() < max_features) {
+                features.resize(max_features, 0.0f);  // Дополняем нулями
+            }
+
             data.emplace_back(std::move(features), label);
         }
     }
-    
+
     file.close();
     return data;
 }

@@ -7,7 +7,8 @@
 
 class DataLoader {
 public:
-    static std::vector<DataPoint> loadFromCSV(const std::string& filename);
+    static std::vector<DataPoint> loadFromCSV(const std::string& filename,
+        size_t max_features = 0);
     static void splitTrainTest(const std::vector<DataPoint>& data,
                                std::vector<DataPoint>& train,
                                std::vector<DataPoint>& test,
