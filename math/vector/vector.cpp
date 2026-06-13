@@ -56,3 +56,5 @@ Vector Vector::multiply(float scalar) const {
     }
     return result;
 }
+
+Vector::Vector(size_t size, float init_value) : data(size, init_value) {};

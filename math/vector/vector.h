@@ -20,6 +20,7 @@ public:
     float dot(const Vector& other) const;
     Vector add(const Vector& other) const;
     Vector multiply(float scalar) const;
+    Vector(size_t size, float init_value);
 };
 
 #endif
