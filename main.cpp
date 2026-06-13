@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <random>
 #include <iomanip>
+#include <memory>  // ← ← ← ДОБАВЛЕНО: для std::unique_ptr
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
@@ -43,7 +44,7 @@ struct DatasetResult {
     size_t train_size;
     size_t test_size;
     float f1_neural;
-    NeuralNetwork* trained_net;  // Указатель на обученную сеть (для fine-tuning)
+    // ← ← ← УДАЛЕНО: NeuralNetwork* trained_net; (не использовалось, сырой указатель)
 };
 
 DatasetResult evaluate_dataset(const std::string& name, const std::string& filepath) {
@@ -56,7 +57,7 @@ DatasetResult evaluate_dataset(const std::string& name, const std::string& filep
     auto data = DataLoader::loadFromCSV(filepath);
     if (data.empty()) {
         std::cerr << "  ERROR: No data loaded!" << std::endl;
-        return {name, 0, 0, 0, 0.0f, nullptr};
+        return {name, 0, 0, 0, 0.0f};  // ← Убран nullptr
     }
 
     size_t feature_count = DataLoader::getFeatureCount(data);
@@ -74,7 +75,9 @@ DatasetResult evaluate_dataset(const std::string& name, const std::string& filep
     // 4. Нейросеть
     std::cout << "\n[3] Creating & Training Neural Network..." << std::endl;
     int hidden_size = static_cast<int>(feature_count) * 2;
-    NeuralNetwork* net = new NeuralNetwork(static_cast<int>(feature_count), hidden_size, 1);
+
+    // ← ← ← ИСПРАВЛЕНО: unique_ptr вместо raw pointer
+    auto net = std::make_unique<NeuralNetwork>(static_cast<int>(feature_count), hidden_size, 1);
     net->init_weights();
     train_neural_network(*net, train_data);
 
@@ -100,13 +103,14 @@ DatasetResult evaluate_dataset(const std::string& name, const std::string& filep
     }
     results.close();
 
-    return {name, feature_count, train_data.size(), test_data.size(), report.f1(), net};
+    // ← ← ← ИСПРАВЛЕНО: не возвращаем pointer
+    return {name, feature_count, train_data.size(), test_data.size(), report.f1()};
 }
 
 // ==================== ДООБУЧЕНИЕ НА D3 (FINE-TUNING) ====================
 
 float fine_tune_and_evaluate_d3(const std::string& d3_path,
-                                 NeuralNetwork* base_net,
+                                 NeuralNetwork& base_net,  // ← ← ← ССЫЛКА вместо указателя
                                  size_t base_feature_count) {
     std::cout << "\n========================================" << std::endl;
     std::cout << "  Fine-tuning on d3 (Defense Mode)     " << std::endl;
@@ -130,20 +134,23 @@ float fine_tune_and_evaluate_d3(const std::string& d3_path,
     std::cout << "  Train: " << d3_train.size() << ", Test: " << d3_test.size() << std::endl;
 
     // 4. Fine-tuning: если число признаков совпадает — используем base_net
-    NeuralNetwork* net_for_d3 = base_net;
+    NeuralNetwork* net_for_d3 = &base_net;  // ← Ссылка на base_net
     if (d3_features != base_feature_count) {
         std::cout << "  ⚠️  Feature count mismatch (" << base_feature_count << " → " << d3_features << ")" << std::endl;
         std::cout << "  Creating new network for d3..." << std::endl;
-        // Создаём новую сеть с правильным числом входов
-        int hidden = static_cast<int>(d3_features) * 2;
-        net_for_d3 = new NeuralNetwork(static_cast<int>(d3_features), hidden, 1);
-        net_for_d3->init_weights();
-        // Короткое обучение на d3_train (так как нет базовых весов)
-        train_neural_network(*net_for_d3, d3_train);
+
+        // ← ← ← ИСПРАВЛЕНО: unique_ptr для временной сети
+        auto temp_net = std::make_unique<NeuralNetwork>(static_cast<int>(d3_features),
+                                                         static_cast<int>(d3_features) * 2, 1);
+        temp_net->init_weights();
+        train_neural_network(*temp_net, d3_train);
+        net_for_d3 = temp_net.get();  // Используем сырой указатель только для вызова (не владеем!)
+
+        // ← ← ← НЕ НУЖЕН delete: unique_ptr сам освободит память при выходе из scope
     } else {
         // Fine-tune: меньше эпох, меньшая "агрессия"
         std::cout << "  Fine-tuning existing model..." << std::endl;
-        NeuralTrainer trainer(*net_for_d3, d3_train, 30, 50, 0.1f, 0.1f);
+        NeuralTrainer trainer(base_net, d3_train, 30, 50, 0.1f, 0.1f);
         trainer.train();
     }
 
@@ -167,13 +174,11 @@ float fine_tune_and_evaluate_d3(const std::string& d3_path,
     }
     results.close();
 
-    // Не удаляем net_for_d3, если это не base_net (чтобы избежать double delete)
-    if (d3_features != base_feature_count && net_for_d3 != base_net) {
-        delete net_for_d3;
-    }
+    // ← ← ← УДАЛЕНО: ручной delete (unique_ptr сам освободит память)
 
     return report.f1();
 }
+
 // ==================== MAIN ====================
 
 int main() {
@@ -186,17 +191,14 @@ int main() {
     std::cout << "\n[1] Detecting max features..." << std::endl;
     size_t max_features = 0;
 
-    // Проверяем d1
     auto d1_check = DataLoader::loadFromCSV("data/d1.csv");
     max_features = std::max(max_features, DataLoader::getFeatureCount(d1_check));
     std::cout << "  d1: " << DataLoader::getFeatureCount(d1_check) << " features" << std::endl;
 
-    // Проверяем d2
     auto d2_check = DataLoader::loadFromCSV("data/d2.csv");
     max_features = std::max(max_features, DataLoader::getFeatureCount(d2_check));
     std::cout << "  d2: " << DataLoader::getFeatureCount(d2_check) << " features" << std::endl;
 
-    // Проверяем d3 (если есть)
     std::ifstream d3_check("data/d3.csv");
     bool has_d3 = d3_check.good();
     d3_check.close();
@@ -211,6 +213,7 @@ int main() {
               << (max_features * 2) << " → 1" << std::endl;
 
     // ==================== ШАГ 2: Создаём ОДНУ универсальную сеть ====================
+    // ← ← ← ИСПОЛЬЗУЕМ ЗНАЧЕНИЕ (не указатель!) — память управляется автоматически
     NeuralNetwork net(static_cast<int>(max_features),
                       static_cast<int>(max_features) * 2, 1);
     net.init_weights();
@@ -222,18 +225,16 @@ int main() {
     std::cout << "  Evaluating: d1                        " << std::endl;
     std::cout << "========================================" << std::endl;
 
-    auto d1_data = DataLoader::loadFromCSV("data/d1.csv", max_features);  // ← С padding!
+    auto d1_data = DataLoader::loadFromCSV("data/d1.csv", max_features);
     for (auto& p : d1_data) { if (p.label == -1) p.label = 0; }
 
     std::vector<DataPoint> d1_train, d1_test;
     DataLoader::splitTrainTest(d1_data, d1_train, d1_test, 0.8f, 42);
     std::cout << "  Train: " << d1_train.size() << ", Test: " << d1_test.size() << std::endl;
 
-    // Обучаем на d1
     std::cout << "  Training on d1..." << std::endl;
     train_neural_network(net, d1_train);
 
-    // Тестируем
     auto pred = predict_neural(net, d1_test);
     std::vector<int> labels;
     for (const auto& p : d1_test) labels.push_back(p.label);
@@ -246,19 +247,17 @@ int main() {
     std::cout << "  Evaluating: d2                        " << std::endl;
     std::cout << "========================================" << std::endl;
 
-    auto d2_data = DataLoader::loadFromCSV("data/d2.csv", max_features);  // ← С padding!
+    auto d2_data = DataLoader::loadFromCSV("data/d2.csv", max_features);
     for (auto& p : d2_data) { if (p.label == -1) p.label = 0; }
 
     std::vector<DataPoint> d2_train, d2_test;
     DataLoader::splitTrainTest(d2_data, d2_train, d2_test, 0.8f, 42);
     std::cout << "  Train: " << d2_train.size() << ", Test: " << d2_test.size() << std::endl;
 
-    // Дообучаем на d2 (fine-tune с весами от d1!)
     std::cout << "  Fine-tuning on d2..." << std::endl;
-    NeuralTrainer trainer_d2(net, d2_train, 50, 100, 0.15f, 0.15f);  // Меньше эпох
+    NeuralTrainer trainer_d2(net, d2_train, 50, 100, 0.15f, 0.15f);
     trainer_d2.train();
 
-    // Тестируем
     pred = predict_neural(net, d2_test);
     labels.clear();
     for (const auto& p : d2_test) labels.push_back(p.label);
@@ -295,19 +294,17 @@ int main() {
     if (has_d3) {
         std::cout << "\n✅ d3.csv found — starting fine-tuning..." << std::endl;
 
-        auto d3_data = DataLoader::loadFromCSV("data/d3.csv", max_features);  // ← С padding!
+        auto d3_data = DataLoader::loadFromCSV("data/d3.csv", max_features);
         for (auto& p : d3_data) { if (p.label == -1) p.label = 0; }
 
         std::vector<DataPoint> d3_train, d3_test;
         DataLoader::splitTrainTest(d3_data, d3_train, d3_test, 0.8f, 42);
         std::cout << "  Train: " << d3_train.size() << ", Test: " << d3_test.size() << std::endl;
 
-        // Fine-tune на d3 (продолжаем с весами от d1+d2!)
         std::cout << "  Fine-tuning on d3..." << std::endl;
         NeuralTrainer trainer_d3(net, d3_train, 30, 50, 0.1f, 0.1f);
         trainer_d3.train();
 
-        // Тестируем
         pred = predict_neural(net, d3_test);
         labels.clear();
         for (const auto& p : d3_test) labels.push_back(p.label);

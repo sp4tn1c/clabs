@@ -4,7 +4,7 @@ Lab 3-4: Neural Network Training Script
 Uses C++ module via pybind11
 
 Each dataset gets its own network architecture based on feature count.
-No zero-padding needed!
+Full integration: save/load weights, accuracy, architecture info.
 
 Usage: python3 python/train.py
 """
@@ -64,10 +64,12 @@ def split_train_test(X, y, train_ratio=0.8, seed=42):
     return X_train, X_test, y_train, y_test
 
 
-def evaluate_dataset(name, filepath):
+def evaluate_dataset(name, filepath, save_model=False):
     """
     Оценка на одном датасете.
     Создаёт НОВУЮ нейросеть под число признаков этого датасета.
+
+    :param save_model: если True, сохраняет веса модели после обучения
     """
     print(f"\n{'='*50}")
     print(f"  Evaluating: {name}")
@@ -93,10 +95,14 @@ def evaluate_dataset(name, filepath):
     # Создание модели (архитектура под этот датасет!)
     print(f"\n[3] Creating Neural Network...")
     input_size = num_features
-    hidden_size = input_size * 2  # Эвристика: hidden = 2*input
+    hidden_size = input_size * 2
 
     net = ml.NeuralNetwork(input_size, hidden_size, 1)
-    print(f"  Architecture: {input_size} → {hidden_size} → 1")
+
+    # Показываем архитектуру (новая фича!)
+    arch = net.get_architecture()
+    print(f"  Architecture: {arch['input']} → {arch['hidden']} → {arch['output']}")
+    print(f"  Total weights: {arch['total_weights']}")
 
     # Обучение
     print(f"\n[4] Training...")
@@ -106,14 +112,26 @@ def evaluate_dataset(name, filepath):
     print(f"\n[5] Evaluating...")
     predictions = net.predict_batch(X_test)
 
-    # Метрики
+    # Метрики через C++ (новая фича!)
+    acc = net.accuracy(X_test, y_test)
     metrics = ml.calculate_f1(predictions, y_test)
+
+    print(f"  Accuracy:  {acc*100:.2f}%")
     print(f"  Precision: {metrics['precision']:.3f}")
     print(f"  Recall:    {metrics['recall']:.3f}")
     print(f"  F1:        {metrics['f1']:.3f}")
 
-    accuracy = (metrics['true_positive'] + metrics['true_negative']) / len(y_test) if len(y_test) > 0 else 0
-    print(f"  Accuracy:  {accuracy*100:.2f}%")
+    # Сохранение модели (новая фича!)
+    if save_model:
+        model_path = f"data/{name}_model.weights"
+        net.save_weights(model_path)
+        print(f"  ✅ Model saved: {model_path}")
+
+        # Тест загрузки (демонстрация)
+        net2 = ml.NeuralNetwork(input_size, hidden_size, 1)
+        net2.load_weights(model_path)
+        acc2 = net2.accuracy(X_test, y_test)
+        print(f"  ✅ Model loaded, accuracy verified: {acc2*100:.2f}%")
 
     return metrics['f1'], len(X_train), len(X_test)
 
@@ -122,22 +140,22 @@ def main():
     print("="*50)
     print("  Lab 3-4: Neural Network (Python + C++)")
     print("  Using pybind11 for C++ integration")
-    print("  (Separate architecture per dataset)")
+    print("  (Full API: save/load weights, accuracy, architecture)")
     print("="*50)
 
     results = []
 
     # d1
-    f1_d1, train_d1, test_d1 = evaluate_dataset("d1", "data/d1.csv")
+    f1_d1, train_d1, test_d1 = evaluate_dataset("d1", "data/d1.csv", save_model=True)
     results.append(("d1", f1_d1, train_d1, test_d1))
 
     # d2
-    f1_d2, train_d2, test_d2 = evaluate_dataset("d2", "data/d2.csv")
+    f1_d2, train_d2, test_d2 = evaluate_dataset("d2", "data/d2.csv", save_model=True)
     results.append(("d2", f1_d2, train_d2, test_d2))
 
     # d3 (если есть)
     if os.path.exists("data/d3.csv"):
-        f1_d3, train_d3, test_d3 = evaluate_dataset("d3", "data/d3.csv")
+        f1_d3, train_d3, test_d3 = evaluate_dataset("d3", "data/d3.csv", save_model=True)
         results.append(("d3", f1_d3, train_d3, test_d3))
     else:
         print(f"\n⚠️  d3.csv not found (will be available on defense)")
